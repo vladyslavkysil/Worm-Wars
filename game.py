@@ -4,7 +4,7 @@
 """
 
 GAME_TITLE: str = "Worms 2D: Console Artillery"
-GAME_VERSION: float = 0.1
+GAME_VERSION: float = 0.2
 turn_counter: int = 0
 
 
@@ -21,10 +21,25 @@ def validate_coordinates(x: int, y: int, width: int, height: int, /) -> bool:
     return valid_x and valid_y
 
 
+def check_air_purity(field: list[str]) -> None:
+    """Сканування мапи (for, range, continue, break, for...else)."""
+    for r_idx in range(len(field)):
+        row = field[r_idx]
+        if "#" in row:
+            continue
+        for char in row:
+            if char == "*":
+                print("[УВАГА] У повітрі помічено дим!")
+                break
+    else:
+        print("[ІНФО] Повітря чисте, балістичні умови стабільні.")
+
+
 def main() -> None:
     width: int = 50
     height: int = 12
     board: list[list[str]] = [["." for _ in range(width)] for _ in range(height)]
+    check_air_purity(["".join(r) for r in board])
     render_battlefield([" ".join(row) for row in board])
 
 
