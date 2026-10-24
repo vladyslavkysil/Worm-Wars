@@ -4,7 +4,7 @@
 """
 
 GAME_TITLE: str = "Worms 2D: Console Artillery"
-GAME_VERSION: float = 0.2
+GAME_VERSION: float = 0.3
 turn_counter: int = 0
 
 
@@ -22,7 +22,6 @@ def validate_coordinates(x: int, y: int, width: int, height: int, /) -> bool:
 
 
 def check_air_purity(field: list[str]) -> None:
-    """Сканування мапи (for, range, continue, break, for...else)."""
     for r_idx in range(len(field)):
         row = field[r_idx]
         if "#" in row:
@@ -35,10 +34,29 @@ def check_air_purity(field: list[str]) -> None:
         print("[ІНФО] Повітря чисте, балістичні умови стабільні.")
 
 
+def create_damage_calculator():
+    total_damage_dealt: int = 0
+
+    def apply_hit(base_dmg: int, *, critical_multiplier: float = 1.0) -> int:
+        nonlocal total_damage_dealt
+        calc = lambda b, m: int(b * m)
+        dmg = calc(base_dmg, critical_multiplier)
+        total_damage_dealt += dmg
+        return dmg
+
+    return apply_hit
+
+
+def input_command() -> str:
+    raw = input("\nОберіть дію (A - вліво, D - вправо, F - постріл, Q - здатися): ") 
+    return raw.strip().upper()
+
+
 def main() -> None:
     width: int = 50
     height: int = 12
     board: list[list[str]] = [["." for _ in range(width)] for _ in range(height)]
+    dmg_engine = create_damage_calculator()
     check_air_purity(["".join(r) for r in board])
     render_battlefield([" ".join(row) for row in board])
 
