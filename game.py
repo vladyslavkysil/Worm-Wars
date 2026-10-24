@@ -3,9 +3,32 @@
 Проєкт: Worms 2D: Console Artillery (Random Procedural Terrain)
 """
 
+import math
+import random
+
 GAME_TITLE: str = "Worms 2D: Console Artillery"
-GAME_VERSION: float = 0.3
+GAME_VERSION: float = 1.0
 turn_counter: int = 0
+
+
+def generate_procedural_terrain(width: int, height: int) -> list[list[str]]:
+    board: list[list[str]] = [["." for _ in range(width)] for _ in range(height)]
+
+    phase1: float = random.uniform(0.0, 6.28)
+    phase2: float = random.uniform(0.0, 6.28)
+    frequency: float = random.uniform(2.5, 4.5)
+    base_depth: float = random.uniform(6.5, 8.5)
+
+    for x in range(width):
+        angle = (x / width) * frequency * math.pi
+        hill_offset = 2.2 * math.sin(angle + phase1) + 1.2 * math.cos(angle * 0.6 + phase2)
+        ground_level = int(base_depth + hill_offset)
+        ground_level = max(3, min(height - 2, ground_level))
+
+        for y in range(ground_level, height):
+            board[y][x] = "#"
+
+    return board
 
 
 def render_battlefield(sky_and_ground: list[str]) -> None:
@@ -48,16 +71,31 @@ def create_damage_calculator():
 
 
 def input_command() -> str:
-    raw = input("\nОберіть дію (A - вліво, D - вправо, F - постріл, Q - здатися): ") 
+    raw = input("\nОберіть дію (A - вліво, D - вправо, F - постріл, Q - здатися): ")
     return raw.strip().upper()
+
+
+def apply_gravity_to_worm(x: int, y: int, board: list[list[str]], height: int) -> int:
+    cur_y = y
+    while cur_y + 1 < height and board[cur_y + 1][x] == ".":
+        cur_y += 1
+    return cur_y
 
 
 def main() -> None:
     width: int = 50
     height: int = 12
-    board: list[list[str]] = [["." for _ in range(width)] for _ in range(height)]
-    dmg_engine = create_damage_calculator()
-    check_air_purity(["".join(r) for r in board])
+
+    board = generate_procedural_terrain(width, height)
+
+    p1_x = 5
+    p1_y = apply_gravity_to_worm(p1_x, 0, board, height)
+    board[p1_y][p1_x] = "1"
+
+    p2_x = 44
+    p2_y = apply_gravity_to_worm(p2_x, 0, board, height)
+    board[p2_y][p2_x] = "2"
+
     render_battlefield([" ".join(row) for row in board])
 
 
