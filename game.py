@@ -1,7 +1,6 @@
 """
-Лабораторна робота 1: Основи Python
+Лабораторна робота 2: Структури даних та файлові операції
 Проєкт: Worms 2D: Console Artillery (Random Procedural Terrain)
-Рівень: 100 балів (із золотими алгоритмічними завданнями)
 """
 
 import math
@@ -22,6 +21,16 @@ TILES: dict[str, dict[str, str | bool]] = {
     "1": {"name": "гравець 1", "passable": False, "destructible": False, "stops_shot": True},
     "2": {"name": "гравець 2", "passable": False, "destructible": False, "stops_shot": True},
 }
+
+
+# Вектори зміщення (dx, dy) для клавіш руху
+MOVE_KEYS: dict[str, tuple[int, int]] = {
+    "A": (-1, 0),
+    "D": (1, 0),
+}
+
+# Підйом на сходинку висотою 1 клітинку
+STEP_UP: tuple[int, int] = (0, -1)
 
 
 def tile_prop(char: str, prop: str) -> bool:
@@ -215,23 +224,37 @@ def main() -> None:
             surrender_msg = f"Гравець {active_player} здався!"
             break
 
-        elif cmd in ("A", "D"):
-            dx = -1 if cmd == "A" else 1
+        elif cmd in MOVE_KEYS:
+            dx, dy = MOVE_KEYS[cmd]
             cur_x = p1_x if active_player == 1 else p2_x
             cur_y = p1_y if active_player == 1 else p2_y
-            nx = cur_x + dx
+            nx, ny = cur_x + dx, cur_y + dy
 
-            if validate_coordinates(nx, cur_y, width, height):
-                if tile_prop(board[cur_y][nx], "passable"):
+            if validate_coordinates(nx, ny, width, height):
+                climbed = False
+                # Якщо попереду сходинка - пробуємо залізти на неї
+                if not tile_prop(board[ny][nx], "passable"):
+                    sx, sy = STEP_UP
+                    up_y = ny + sy
+                    if (
+                        validate_coordinates(nx + sx, up_y, width, height)
+                        and tile_prop(board[up_y][nx + sx], "passable")
+                        and tile_prop(board[cur_y + sy][cur_x], "passable")
+                    ):
+                        ny = up_y
+                        climbed = True
+
+                if tile_prop(board[ny][nx], "passable"):
                     board[cur_y][cur_x] = "."
-                    new_y = apply_gravity_to_worm(nx, cur_y, board, height)
+                    new_y = apply_gravity_to_worm(nx, ny, board, height)
                     board[new_y][nx] = str(active_player)
 
                     if active_player == 1:
                         p1_x, p1_y = nx, new_y
                     else:
                         p2_x, p2_y = nx, new_y
-                    status_message = f"[РУХ] Гравець {active_player} перемістився."
+                    action = "заліз на сходинку" if climbed else "перемістився"
+                    status_message = f"[РУХ] Гравець {active_player} {action}."
                 else:
                     status_message = "[БЛОК] Попереду височина!"
             else:
