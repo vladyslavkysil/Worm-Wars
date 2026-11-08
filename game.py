@@ -10,7 +10,6 @@ import time
 
 GAME_TITLE: str = "Worms 2D: Console Artillery"
 GAME_VERSION: float = 2.1
-turn_counter: int = 0
 
 
 TILES: dict[str, dict[str, str | bool]] = {
@@ -23,13 +22,13 @@ TILES: dict[str, dict[str, str | bool]] = {
 }
 
 
-# Вектори зміщення (dx, dy) для клавіш руху
+
 MOVE_KEYS: dict[str, tuple[int, int]] = {
     "A": (-1, 0),
     "D": (1, 0),
 }
 
-# Підйом на сходинку висотою 1 клітинку
+# zalaz  na  1  kl
 STEP_UP: tuple[int, int] = (0, -1)
 
 
@@ -173,168 +172,174 @@ def simulate_and_draw_shot(
             time.sleep(0.03)
 
 
-def main() -> None:
-    global turn_counter
-
-    width: int = 50
-    height: int = 12
-    game_running: bool = True
-    surrender_msg: None | str = None
-
-    hp_p1: int = 100
-    hp_p2: int = 100
-
+def create_game_state(width: int, height: int) -> dict:
+    """Створює початковий стан гри. Весь стан зберігається в одному словнику."""
     board = generate_procedural_terrain(width, height)
 
-    p1_x = 5
-    p1_y = apply_gravity_to_worm(p1_x, 0, board, height)
-    board[p1_y][p1_x] = "1"
+    state: dict = {
+        "board": board,
+        "width": width,
+        "height": height,
+        "turn": 0,
+        "status": "",
+        "players": {
+            1: {"x": 5, "y": 0, "hp": 100},
+            2: {"x": width - 6, "y": 0, "hp": 100},
+        },
+    }
 
-    p2_x = 44
-    p2_y = apply_gravity_to_worm(p2_x, 0, board, height)
-    board[p2_y][p2_x] = "2"
+    for pid, worm in state["players"].items():
+        worm["y"] = apply_gravity_to_worm(worm["x"], 0, board, height)
+        board[worm["y"]][worm["x"]] = str(pid)
 
+    return state
+
+
+def move_worm(state: dict, pid: int, dx: int, dy: int) -> str:
+    """Переміщує черв'яка на (dx, dy). Повертає повідомлення для гравця."""
+    board = state["board"]
+    width, height = state["width"], state["height"]
+    worm = state["players"][pid]
+    cur_x, cur_y = worm["x"], worm["y"]
+    nx, ny = cur_x + dx, cur_y + dy
+
+    if not validate_coordinates(nx, ny, width, height):
+        return "[МЕЖА] Досягнуто межі карти!"
+
+    climbed = False
+    if not tile_prop(board[ny][nx], "passable"):
+        sx, sy = STEP_UP
+        up_y = ny + sy
+        if (
+            validate_coordinates(nx + sx, up_y, width, height)
+            and tile_prop(board[up_y][nx + sx], "passable")
+            and tile_prop(board[cur_y + sy][cur_x], "passable")
+        ):
+            ny = up_y
+            climbed = True
+
+    if not tile_prop(board[ny][nx], "passable"):
+        return "[БЛОК] Попереду височина!"
+
+    board[cur_y][cur_x] = "."
+    worm["x"] = nx
+    worm["y"] = apply_gravity_to_worm(nx, ny, board, height)
+    board[worm["y"]][nx] = str(pid)
+
+    action = "заліз на сходинку" if climbed else "перемістився"
+    return f"[РУХ] Гравець {pid} {action}."
+
+
+def explode(state: dict, ix: int, iy: int, dmg_engine) -> str:
+    """Вибух: руйнує землю, наносить шкоду і заново застосовує гравітацію."""
+    board = state["board"]
+    width, height = state["width"], state["height"]
+    event_logs = [f"[ВИБУХ] Влучання в координатах ({ix}, {iy})!"]
+
+    # Деформація породи вибухом
+    for by in range(max(0, iy - 1), min(height, iy + 2)):
+        for bx in range(max(0, ix - 1), min(width, ix + 2)):
+            if tile_prop(board[by][bx], "destructible"):
+                board[by][bx] = "."
+
+    for pid, worm in state["players"].items():
+        # uron
+        if abs(ix - worm["x"]) <= 2 and abs(iy - worm["y"]) <= 2:
+            loss = dmg_engine(35, critical_multiplier=1.2)
+            worm["hp"] -= loss
+            event_logs.append(f"[УШКОДЖЕННЯ] Гравець {pid} втратив {loss} HP!")
+
+        # черв'як падає, якщо під ним вибило землю
+        if board[worm["y"]][worm["x"]] == str(pid):
+            board[worm["y"]][worm["x"]] = "."
+        worm["y"] = apply_gravity_to_worm(worm["x"], worm["y"], board, height)
+        board[worm["y"]][worm["x"]] = str(pid)
+
+    return "\n".join(event_logs)
+
+
+def fire(state: dict, pid: int, wind: float, dmg_engine) -> str:
+    """Запитує кут і силу, запускає снаряд і обробляє влучання."""
+    try:
+        angle = float(input("Кут нахилу ствола (наприклад, 45 градусів): "))
+    except ValueError:
+        angle = 45.0
+
+    try:
+        power = float(input("Сила пострілу (від 1.5 до 4.5): "))
+    except ValueError:
+        power = 3.0
+
+    worm = state["players"][pid]
+    shoot_dir = 1 if pid == 1 else -1
+
+    impact = simulate_and_draw_shot(
+        worm["x"], worm["y"] - 1, angle, power, shoot_dir, wind,
+        state["board"], state["width"], state["height"],
+    )
+
+    if impact is None:
+        return "[ПРОМАХ] Снаряд полетів за межі зони!"
+    return explode(state, impact[0], impact[1], dmg_engine)
+
+
+def get_winner_text(state: dict) -> str | None:
+    """Повертає текст результату, якщо гра закінчилась, інакше None."""
+    hp1 = state["players"][1]["hp"]
+    hp2 = state["players"][2]["hp"]
+    if hp1 <= 0 and hp2 <= 0:
+        return "Нічия! Обидва черв'яки знищені!"
+    if hp1 <= 0:
+        return "ПЕРЕМОГА ГРАВЦЯ 2!"
+    if hp2 <= 0:
+        return "ПЕРЕМОГА ГРАВЦЯ 1!"
+    return None
+
+
+def main() -> None:
+    state = create_game_state(width=50, height=12)
     dmg_engine = create_damage_calculator()
 
     clear_screen()
     print("=== Worms Duel Console Edition ===")
-    check_air_purity(["".join(r) for r in board])
+    check_air_purity(["".join(r) for r in state["board"]])
     time.sleep(1.2)
 
-    status_message: str = ""
-
-    while game_running:
-        turn_counter += 1
-        active_player = 1 if (turn_counter % 2 != 0) else 2
-
-        wind_speed: float = round(0.02 * math.sin(turn_counter * 1.7), 3)
+    while True:
+        state["turn"] += 1
+        turn = state["turn"]
+        active_player = 1 if (turn % 2 != 0) else 2
+        wind_speed: float = round(0.02 * math.sin(turn * 1.7), 3)
 
         clear_screen()
-        render_battlefield([" ".join(row) for row in board])
-        print(f"Хід №{turn_counter} | Черга: Гравець {active_player}")
+        render_battlefield([" ".join(row) for row in state["board"]])
+        print(f"Хід №{turn} | Черга: Гравець {active_player}")
         print(f"Вітер: {wind_speed:+} (впливає на дальність)")
-        print(f"Гравець 1 (1): {hp_p1} HP | Гравець 2 (2): {hp_p2} HP")
-        if status_message:
-            print(f"\n{status_message}")
-            status_message = ""
+        p1, p2 = state["players"][1], state["players"][2]
+        print(f"Гравець 1 (1): {p1['hp']} HP | Гравець 2 (2): {p2['hp']} HP")
+        if state["status"]:
+            print(f"\n{state['status']}")
+            state["status"] = ""
 
         cmd = input_command()
 
         if cmd == "Q":
-            surrender_msg = f"Гравець {active_player} здався!"
+            print(f"\nКінець гри: Гравець {active_player} здався!")
             break
-
         elif cmd in MOVE_KEYS:
             dx, dy = MOVE_KEYS[cmd]
-            cur_x = p1_x if active_player == 1 else p2_x
-            cur_y = p1_y if active_player == 1 else p2_y
-            nx, ny = cur_x + dx, cur_y + dy
-
-            if validate_coordinates(nx, ny, width, height):
-                climbed = False
-                # Якщо попереду сходинка - пробуємо залізти на неї
-                if not tile_prop(board[ny][nx], "passable"):
-                    sx, sy = STEP_UP
-                    up_y = ny + sy
-                    if (
-                        validate_coordinates(nx + sx, up_y, width, height)
-                        and tile_prop(board[up_y][nx + sx], "passable")
-                        and tile_prop(board[cur_y + sy][cur_x], "passable")
-                    ):
-                        ny = up_y
-                        climbed = True
-
-                if tile_prop(board[ny][nx], "passable"):
-                    board[cur_y][cur_x] = "."
-                    new_y = apply_gravity_to_worm(nx, ny, board, height)
-                    board[new_y][nx] = str(active_player)
-
-                    if active_player == 1:
-                        p1_x, p1_y = nx, new_y
-                    else:
-                        p2_x, p2_y = nx, new_y
-                    action = "заліз на сходинку" if climbed else "перемістився"
-                    status_message = f"[РУХ] Гравець {active_player} {action}."
-                else:
-                    status_message = "[БЛОК] Попереду височина!"
-            else:
-                status_message = "[МЕЖА] Досягнуто межі карти!"
-
+            state["status"] = move_worm(state, active_player, dx, dy)
         elif cmd == "F":
-            try:
-                angle = float(input("Кут нахилу ствола (наприклад, 45 градусів): "))
-            except ValueError:
-                angle = 45.0
-
-            try:
-                power = float(input("Сила пострілу (від 1.5 до 4.5): "))
-            except ValueError:
-                power = 3.0
-
-            cur_x = p1_x if active_player == 1 else p2_x
-            cur_y = p1_y if active_player == 1 else p2_y
-            shoot_dir = 1 if active_player == 1 else -1
-
-            impact = simulate_and_draw_shot(
-                cur_x, cur_y - 1, angle, power, shoot_dir, wind_speed, board, width, height
-            )
-
-            if impact is None:
-                status_message = "[ПРОМАХ] Снаряд полетів за межі зони!"
-            else:
-                ix, iy = impact
-                event_logs = [f"[ВИБУХ] Влучання в координатах ({ix}, {iy})!"]
-
-                # Деформація породи вибухом
-                for by in range(max(0, iy - 1), min(height, iy + 2)):
-                    for bx in range(max(0, ix - 1), min(width, ix + 2)):
-                        if tile_prop(board[by][bx], "destructible"):
-                            board[by][bx] = "."
-
-                # uron
-                if abs(ix - p1_x) <= 2 and abs(iy - p1_y) <= 2:
-                    loss = dmg_engine(35, critical_multiplier=1.2)
-                    hp_p1 -= loss
-                    event_logs.append(f"[УШКОДЖЕННЯ] Гравець 1 втратив {loss} HP!")
-
-                if abs(ix - p2_x) <= 2 and abs(iy - p2_y) <= 2:
-                    loss = dmg_engine(35, critical_multiplier=1.2)
-                    hp_p2 -= loss
-                    event_logs.append(f"[УШКОДЖЕННЯ] Гравець 2 втратив {loss} HP!")
-
-                
-                if board[p1_y][p1_x] == "1":
-                    board[p1_y][p1_x] = "."
-                p1_y = apply_gravity_to_worm(p1_x, p1_y, board, height)
-                board[p1_y][p1_x] = "1"
-
-                if board[p2_y][p2_x] == "2":
-                    board[p2_y][p2_x] = "."
-                p2_y = apply_gravity_to_worm(p2_x, p2_y, board, height)
-                board[p2_y][p2_x] = "2"
-
-                status_message = "\n".join(event_logs)
+            state["status"] = fire(state, active_player, wind_speed, dmg_engine)
         else:
-            status_message = "[ПОМИЛКА] Невідома дія! Хід пропущено."
+            state["status"] = "[ПОМИЛКА] Невідома дія! Хід пропущено."
 
-        if hp_p1 <= 0 and hp_p2 <= 0:
+        result = get_winner_text(state)
+        if result is not None:
             clear_screen()
-            render_battlefield([" ".join(row) for row in board])
-            print("\n[РЕЗУЛЬТАТ] Нічия! Обидва черв'яки знищені!")
-            game_running = False
-        elif hp_p1 <= 0:
-            clear_screen()
-            render_battlefield([" ".join(row) for row in board])
-            print("\n[РЕЗУЛЬТАТ] ПЕРЕМОГА ГРАВЦЯ 2!")
-            game_running = False
-        elif hp_p2 <= 0:
-            clear_screen()
-            render_battlefield([" ".join(row) for row in board])
-            print("\n[РЕЗУЛЬТАТ] ПЕРЕМОГА ГРАВЦЯ 1!")
-            game_running = False
-
-    if surrender_msg is not None:
-        print(f"\nКінець гри: {surrender_msg}")
+            render_battlefield([" ".join(row) for row in state["board"]])
+            print(f"\n[РЕЗУЛЬТАТ] {result}")
+            break
 
 
 if __name__ == "__main__":
