@@ -69,6 +69,60 @@ def generate_procedural_terrain(width: int, height: int) -> list[list[str]]:
     return board
 
 
+# Символи, які дозволені на карті у файлі рівня (множина - швидка перевірка "in")
+MAP_CHARS: set[str] = {".", "#", "X"}
+
+
+def load_level(path: str) -> dict:
+
+    with open(path, "r", encoding="utf-8") as file:
+        lines = file.readlines()
+
+    header: dict[str, str] = {}
+    map_rows: list[str] = []
+    in_map = False
+
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not in_map:
+            if line == "" or line.startswith("#"):
+                continue
+            if line == "---":
+                in_map = True
+                continue
+            if ":" not in line:
+                raise ValueError(f"Незрозумілий рядок заголовка: '{line}'")
+            key, value = line.split(":", 1)
+            header[key.strip()] = value.strip()
+        elif line:
+            map_rows.append(line)
+
+    if not map_rows:
+        raise ValueError("У файлі немає карти після ---")
+
+    width = len(map_rows[0])
+    for row_num, row in enumerate(map_rows, start=1):
+        if len(row) != width:
+            raise ValueError(f"Рядок карти {row_num} має довжину {len(row)}, а треба {width}")
+        bad_chars = set(row) - MAP_CHARS
+        if bad_chars:
+            raise ValueError(f"Невідомі символи в рядку {row_num}: {', '.join(sorted(bad_chars))}")
+
+    try:
+        spawns = (int(header["spawn1"]), int(header["spawn2"]))
+    except KeyError as missing:
+        raise ValueError(f"У заголовку немає ключа {missing}")
+    except ValueError:
+        raise ValueError("spawn1 і spawn2 мають бути цілими числами")
+
+    for spawn_x in spawns:
+        if not 0 <= spawn_x < width:
+            raise ValueError(f"Точка появи x={spawn_x} за межами карти (ширина {width})")
+
+    board = [list(row) for row in map_rows]
+    return {"name": header.get("name", path), "board": board, "spawns": spawns}
+
+
 def render_battlefield(sky_and_ground: list[str]) -> None:
     print(f"\n=== {GAME_TITLE} (v{GAME_VERSION}) ===")
     for row in sky_and_ground:
@@ -172,19 +226,21 @@ def simulate_and_draw_shot(
             time.sleep(0.03)
 
 
-def create_game_state(width: int, height: int) -> dict:
-    """Створює початковий стан гри. Весь стан зберігається в одному словнику."""
-    board = generate_procedural_terrain(width, height)
+def create_game_state(board: list[list[str]], spawns: tuple[int, int], level_name: str) -> dict:
+    
+    height = len(board)
+    width = len(board[0])
 
     state: dict = {
+        "level_name": level_name,
         "board": board,
         "width": width,
         "height": height,
         "turn": 0,
         "status": "",
         "players": {
-            1: {"x": 5, "y": 0, "hp": 100},
-            2: {"x": width - 6, "y": 0, "hp": 100},
+            1: {"x": spawns[0], "y": 0, "hp": 100},
+            2: {"x": spawns[1], "y": 0, "hp": 100},
         },
     }
 
@@ -196,7 +252,7 @@ def create_game_state(width: int, height: int) -> dict:
 
 
 def move_worm(state: dict, pid: int, dx: int, dy: int) -> str:
-    """Переміщує черв'яка на (dx, dy). Повертає повідомлення для гравця."""
+    
     board = state["board"]
     width, height = state["width"], state["height"]
     worm = state["players"][pid]
@@ -231,7 +287,7 @@ def move_worm(state: dict, pid: int, dx: int, dy: int) -> str:
 
 
 def explode(state: dict, ix: int, iy: int, dmg_engine) -> str:
-    """Вибух: руйнує землю, наносить шкоду і заново застосовує гравітацію."""
+    #Вибух: руйнує землю, наносить шкоду і заново застосовує гравітацію
     board = state["board"]
     width, height = state["width"], state["height"]
     event_logs = [f"[ВИБУХ] Влучання в координатах ({ix}, {iy})!"]
@@ -259,7 +315,7 @@ def explode(state: dict, ix: int, iy: int, dmg_engine) -> str:
 
 
 def fire(state: dict, pid: int, wind: float, dmg_engine) -> str:
-    """Запитує кут і силу, запускає снаряд і обробляє влучання."""
+    
     try:
         angle = float(input("Кут нахилу ствола (наприклад, 45 градусів): "))
     except ValueError:
@@ -284,7 +340,7 @@ def fire(state: dict, pid: int, wind: float, dmg_engine) -> str:
 
 
 def get_winner_text(state: dict) -> str | None:
-    """Повертає текст результату, якщо гра закінчилась, інакше None."""
+    
     hp1 = state["players"][1]["hp"]
     hp2 = state["players"][2]["hp"]
     if hp1 <= 0 and hp2 <= 0:
@@ -296,12 +352,42 @@ def get_winner_text(state: dict) -> str | None:
     return None
 
 
+
+LEVEL_FILE: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "levels", "level1.txt")
+
+
+def choose_map() -> dict:
+    """Меню вибору карти: рівень з файлу або випадкова генерація."""
+    clear_screen()
+    print("=== Worms Duel Console Edition ===")
+    print(f"1 - карта з файлу ({LEVEL_FILE})")
+    print("R - випадкова карта")
+    choice = input("Ваш вибір: ").strip().upper()
+
+    if choice == "1":
+        try:
+            return load_level(LEVEL_FILE)
+        except FileNotFoundError:
+            print(f"[ПОМИЛКА] Файл {LEVEL_FILE} не знайдено. Генерую випадкову карту.")
+        except ValueError as error:
+            print(f"[ПОМИЛКА] Рівень пошкоджений: {error}. Генерую випадкову карту.")
+        time.sleep(2)
+
+    width, height = 50, 12
+    return {
+        "name": "Випадкова карта",
+        "board": generate_procedural_terrain(width, height),
+        "spawns": (5, width - 6),
+    }
+
+
 def main() -> None:
-    state = create_game_state(width=50, height=12)
+    level = choose_map()
+    state = create_game_state(level["board"], level["spawns"], level["name"])
     dmg_engine = create_damage_calculator()
 
     clear_screen()
-    print("=== Worms Duel Console Edition ===")
+    print(f"=== Worms Duel Console Edition: {state['level_name']} ===")
     check_air_purity(["".join(r) for r in state["board"]])
     time.sleep(1.2)
 
