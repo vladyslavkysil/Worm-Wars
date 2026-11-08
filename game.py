@@ -14,6 +14,21 @@ GAME_VERSION: float = 2.1
 turn_counter: int = 0
 
 
+TILES: dict[str, dict[str, str | bool]] = {
+    ".": {"name": "повітря", "passable": True, "destructible": False, "stops_shot": False},
+    "*": {"name": "снаряд", "passable": True, "destructible": False, "stops_shot": False},
+    "#": {"name": "земля", "passable": False, "destructible": True, "stops_shot": True},
+    "X": {"name": "бетон", "passable": False, "destructible": False, "stops_shot": True},
+    "1": {"name": "гравець 1", "passable": False, "destructible": False, "stops_shot": True},
+    "2": {"name": "гравець 2", "passable": False, "destructible": False, "stops_shot": True},
+}
+
+
+def tile_prop(char: str, prop: str) -> bool:
+    """Повертає властивість клітинки зі словника TILES (невідомий символ - як стіна)."""
+    return bool(TILES.get(char, TILES["X"])[prop])
+
+
 def clear_screen() -> None:
     """Очищення вікна термінала для Windows та Unix/Linux/macOS."""
     os.system("cls" if os.name == "nt" else "clear")
@@ -39,6 +54,9 @@ def generate_procedural_terrain(width: int, height: int) -> list[list[str]]:
 
         for y in range(ground_level, height):
             board[y][x] = "#"
+
+    # Нижній ряд - бетонна основа, яку не можна пробити
+    board[height - 1] = ["X" for _ in range(width)]
 
     return board
 
@@ -89,7 +107,7 @@ def input_command() -> str:
 
 def apply_gravity_to_worm(x: int, y: int, board: list[list[str]], height: int) -> int:
     cur_y = y
-    while cur_y + 1 < height and board[cur_y + 1][x] == ".":
+    while cur_y + 1 < height and tile_prop(board[cur_y + 1][x], "passable"):
         cur_y += 1
     return cur_y
 
@@ -122,7 +140,7 @@ def simulate_and_draw_shot(
 
         ix, iy = int(round(curr_x)), int(round(curr_y))
 
-        # Виліт за межі карти
+        #Vilit
         if not (0 <= ix < width and 0 <= iy < height):
             if iy >= height or ix < 0 or ix >= width:
                 for px, py, old_char in prev_coords:
@@ -130,13 +148,13 @@ def simulate_and_draw_shot(
                 return None
             continue
 
-        # Влучання в перешкоду або гравця
-        if board[iy][ix] in ("#", "1", "2"):
+        # popal
+        if tile_prop(board[iy][ix], "stops_shot"):
             for px, py, old_char in prev_coords:
                 board[py][px] = old_char
             return ix, iy
 
-        # Відображення польоту снаряда
+        # traektoria
         if board[iy][ix] == ".":
             prev_coords.append((ix, iy, "."))
             board[iy][ix] = "*"
@@ -204,7 +222,7 @@ def main() -> None:
             nx = cur_x + dx
 
             if validate_coordinates(nx, cur_y, width, height):
-                if board[cur_y][nx] == ".":
+                if tile_prop(board[cur_y][nx], "passable"):
                     board[cur_y][cur_x] = "."
                     new_y = apply_gravity_to_worm(nx, cur_y, board, height)
                     board[new_y][nx] = str(active_player)
@@ -247,10 +265,10 @@ def main() -> None:
                 # Деформація породи вибухом
                 for by in range(max(0, iy - 1), min(height, iy + 2)):
                     for bx in range(max(0, ix - 1), min(width, ix + 2)):
-                        if board[by][bx] == "#":
+                        if tile_prop(board[by][bx], "destructible"):
                             board[by][bx] = "."
 
-                # Шкода гравцям
+                # uron
                 if abs(ix - p1_x) <= 2 and abs(iy - p1_y) <= 2:
                     loss = dmg_engine(35, critical_multiplier=1.2)
                     hp_p1 -= loss
@@ -261,7 +279,7 @@ def main() -> None:
                     hp_p2 -= loss
                     event_logs.append(f"[УШКОДЖЕННЯ] Гравець 2 втратив {loss} HP!")
 
-                # Перерахунок положення після вибуху
+                
                 if board[p1_y][p1_x] == "1":
                     board[p1_y][p1_x] = "."
                 p1_y = apply_gravity_to_worm(p1_x, p1_y, board, height)
