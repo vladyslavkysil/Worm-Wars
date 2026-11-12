@@ -7,6 +7,7 @@ import math
 import os
 import random
 import time
+from collections import deque
 from datetime import datetime
 
 GAME_TITLE: str = "Worms 2D: Console Artillery"
@@ -31,6 +32,8 @@ MOVE_KEYS: dict[str, tuple[int, int]] = {
 
 # zalaz  na  1  kl
 STEP_UP: tuple[int, int] = (0, -1)
+
+NEIGHBORS: tuple[tuple[int, int], ...] = ((1, 0), (-1, 0), (0, 1), (0, -1))
 
 
 def tile_prop(char: str, prop: str) -> bool:
@@ -121,7 +124,42 @@ def load_level(path: str) -> dict:
             raise ValueError(f"Точка появи x={spawn_x} за межами карти (ширина {width})")
 
     board = [list(row) for row in map_rows]
+    check_reachability(board, spawns)
     return {"name": header.get("name", path), "board": board, "spawns": spawns}
+
+
+def check_reachability(board: list[list[str]], spawns: tuple[int, int]) -> None:
+    height = len(board)
+    width = len(board[0])
+
+    landing: list[tuple[int, int]] = []
+    for num, spawn_x in enumerate(spawns, start=1):
+        if not tile_prop(board[0][spawn_x], "passable"):
+            raise ValueError(f"Гравець {num} з'являється всередині землі (x={spawn_x})")
+        spawn_y = apply_gravity_to_worm(spawn_x, 0, board, height)
+        if spawn_y == height - 1 and tile_prop(board[spawn_y][spawn_x], "passable"):
+            raise ValueError(f"Під гравцем {num} немає землі, він падає за карту")
+        landing.append((spawn_x, spawn_y))
+
+    start, goal = landing
+    visited: set[tuple[int, int]] = {start}
+    queue: deque[tuple[int, int]] = deque([start])
+
+    while queue:
+        x, y = queue.popleft()
+        if (x, y) == goal:
+            return
+        for dx, dy in NEIGHBORS:
+            nx, ny = x + dx, y + dy
+            if (
+                validate_coordinates(nx, ny, width, height)
+                and (nx, ny) not in visited
+                and tile_prop(board[ny][nx], "passable")
+            ):
+                visited.add((nx, ny))
+                queue.append((nx, ny))
+
+    raise ValueError("Гравці замуровані: між ними немає жодного шляху через повітря")
 
 
 def render_battlefield(sky_and_ground: list[str]) -> None:
@@ -354,32 +392,44 @@ def get_winner_text(state: dict) -> str | None:
 
 
 
-LEVEL_FILE: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "levels", "level1.txt")
+LEVELS_DIR: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "levels")
+LEVEL_FILES: dict[str, str] = {
+    "1": os.path.join(LEVELS_DIR, "level1.txt"),
+    "2": os.path.join(LEVELS_DIR, "test_closed.txt"),
+}
+
+
+def make_random_map(width: int = 50, height: int = 12, attempts: int = 20) -> dict:
+    spawns = (5, width - 6)
+    for _ in range(attempts):
+        board = generate_procedural_terrain(width, height)
+        try:
+            check_reachability(board, spawns)
+        except ValueError:
+            continue
+        return {"name": "Випадкова карта", "board": board, "spawns": spawns}
+    raise RuntimeError("Не вдалося згенерувати прохідну карту")
 
 
 def choose_map() -> dict:
-    """Меню вибору карти: рівень з файлу або випадкова генерація."""
     clear_screen()
     print("=== Worms Duel Console Edition ===")
-    print(f"1 - карта з файлу ({LEVEL_FILE})")
+    print("1 - Два пагорби (levels/level1.txt)")
+    print("2 - Тест: замурована карта (levels/test_closed.txt)")
     print("R - випадкова карта")
     choice = input("Ваш вибір: ").strip().upper()
 
-    if choice == "1":
+    if choice in LEVEL_FILES:
+        path = LEVEL_FILES[choice]
         try:
-            return load_level(LEVEL_FILE)
+            return load_level(path)
         except FileNotFoundError:
-            print(f"[ПОМИЛКА] Файл {LEVEL_FILE} не знайдено. Генерую випадкову карту.")
+            print(f"[ПОМИЛКА] Файл {path} не знайдено. Генерую випадкову карту.")
         except ValueError as error:
-            print(f"[ПОМИЛКА] Рівень пошкоджений: {error}. Генерую випадкову карту.")
+            print(f"[ПОМИЛКА] Рівень відхилено: {error}. Генерую випадкову карту.")
         time.sleep(2)
 
-    width, height = 50, 12
-    return {
-        "name": "Випадкова карта",
-        "board": generate_procedural_terrain(width, height),
-        "spawns": (5, width - 6),
-    }
+    return make_random_map()
 
 
 SCORES_FILE: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scores.txt")
