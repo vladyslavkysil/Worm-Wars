@@ -12,3 +12,5 @@ ENV/
 
 .pytest_cache/
 .mypy_cache/
+# Локальні рекорди гравців
+scores.txt

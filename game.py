@@ -7,6 +7,7 @@ import math
 import os
 import random
 import time
+from datetime import datetime
 
 GAME_TITLE: str = "Worms 2D: Console Artillery"
 GAME_VERSION: float = 2.1
@@ -381,6 +382,49 @@ def choose_map() -> dict:
     }
 
 
+SCORES_FILE: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scores.txt")
+
+
+# дописуємо результат в кінець файлу, режим "a" не стирає старі рекорди
+def save_record(winner: str, turns: int, level_name: str, hp_left: int) -> None:
+    date = datetime.now().strftime("%Y-%m-%d %H:%M")
+    fields = [date, winner, str(turns), level_name, str(hp_left)]
+    with open(SCORES_FILE, "a", encoding="utf-8") as file:
+        file.write(";".join(fields) + "\n")
+
+
+# читаємо рекорди з файлу, биті рядки пропускаємо
+def load_records() -> list[tuple[str, str, int, str, int]]:
+    records: list[tuple[str, str, int, str, int]] = []
+    try:
+        with open(SCORES_FILE, "r", encoding="utf-8") as file:
+            for line in file:
+                parts = line.strip().split(";")
+                if len(parts) != 5:
+                    continue
+                date, winner, turns, level_name, hp_left = parts
+                try:
+                    records.append((date, winner, int(turns), level_name, int(hp_left)))
+                except ValueError:
+                    continue
+    except FileNotFoundError:
+        pass
+    return records
+
+
+# топ перемог: менше ходів - вище, при рівності вище той, у кого більше HP
+def show_top_records(limit: int = 5) -> None:
+    wins = [r for r in load_records() if r[1] != "Нічия"]
+    wins.sort(key=lambda r: (r[2], -r[4]))
+
+    print("\n=== ТОП ПЕРЕМОГ (найменше ходів) ===")
+    if not wins:
+        print("Поки що рекордів немає.")
+        return
+    for place, (date, winner, turns, level_name, hp_left) in enumerate(wins[:limit], start=1):
+        print(f"{place}. {winner} - {turns} ходів, {hp_left} HP ({level_name}, {date})")
+
+
 def main() -> None:
     level = choose_map()
     state = create_game_state(level["board"], level["spawns"], level["name"])
@@ -410,6 +454,7 @@ def main() -> None:
         cmd = input_command()
 
         if cmd == "Q":
+            # Здача не йде в рекорди, інакше "перемога за 1 хід" буде найкращою
             print(f"\nКінець гри: Гравець {active_player} здався!")
             break
         elif cmd in MOVE_KEYS:
@@ -425,7 +470,17 @@ def main() -> None:
             clear_screen()
             render_battlefield([" ".join(row) for row in state["board"]])
             print(f"\n[РЕЗУЛЬТАТ] {result}")
+
+            p1_hp, p2_hp = state["players"][1]["hp"], state["players"][2]["hp"]
+            if p1_hp <= 0 and p2_hp <= 0:
+                save_record("Нічия", turn, state["level_name"], 0)
+            elif p2_hp <= 0:
+                save_record("Гравець 1", turn, state["level_name"], p1_hp)
+            else:
+                save_record("Гравець 2", turn, state["level_name"], p2_hp)
             break
+
+    show_top_records()
 
 
 if __name__ == "__main__":
