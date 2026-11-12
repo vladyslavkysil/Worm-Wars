@@ -1,0 +1,12 @@
+{
+  "levels": [
+    {
+      "file": "level1.txt",
+      "title": "Два пагорби"
+    },
+    {
+      "file": "level2.txt",
+      "title": "Каньйон з навісом"
+    }
+  ]
+}

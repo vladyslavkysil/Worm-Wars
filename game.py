@@ -3,6 +3,7 @@
 Проєкт: Worms 2D: Console Artillery (Random Procedural Terrain)
 """
 
+import json
 import math
 import os
 import random
@@ -202,7 +203,7 @@ def create_damage_calculator():
 
 
 def input_command() -> str:
-    raw = input("\nОберіть дію (A - вліво, D - вправо, F - постріл, Q - здатися): ")
+    raw = input("\nОберіть дію (A - вліво, D - вправо, F - постріл, S - зберегти, Q - здатися): ")
     return raw.strip().upper()
 
 
@@ -392,11 +393,11 @@ def get_winner_text(state: dict) -> str | None:
 
 
 
-LEVELS_DIR: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "levels")
-LEVEL_FILES: dict[str, str] = {
-    "1": os.path.join(LEVELS_DIR, "level1.txt"),
-    "2": os.path.join(LEVELS_DIR, "test_closed.txt"),
-}
+BASE_DIR: str = os.path.dirname(os.path.abspath(__file__))
+LEVELS_DIR: str = os.path.join(BASE_DIR, "levels")
+CATALOG_FILE: str = os.path.join(LEVELS_DIR, "levels.json")
+SAVE_FILE: str = os.path.join(BASE_DIR, "savegame.json")
+TEST_LEVEL_FILE: str = os.path.join(LEVELS_DIR, "test_closed.txt")
 
 
 def make_random_map(width: int = 50, height: int = 12, attempts: int = 20) -> dict:
@@ -411,28 +412,110 @@ def make_random_map(width: int = 50, height: int = 12, attempts: int = 20) -> di
     raise RuntimeError("Не вдалося згенерувати прохідну карту")
 
 
-def choose_map() -> dict:
+def load_catalog() -> list[dict]:
+    try:
+        with open(CATALOG_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
+        levels = data["levels"]
+        for item in levels:
+            if "file" not in item or "title" not in item:
+                raise KeyError("file/title")
+        return levels
+    except FileNotFoundError:
+        print(f"[ПОМИЛКА] Каталог {CATALOG_FILE} не знайдено.")
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        print(f"[ПОМИЛКА] Каталог рівнів пошкоджений: {error}")
+    return []
+
+
+def load_catalog_level(catalog: list[dict], index: int) -> dict:
+    path = os.path.join(LEVELS_DIR, catalog[index]["file"])
+    level = load_level(path)
+    level["index"] = index
+    return level
+
+
+def save_game(state: dict) -> str:
+    data = {
+        "level_name": state["level_name"],
+        "level_index": state.get("level_index"),
+        "turn": state["turn"],
+        "board": ["".join(row) for row in state["board"]],
+        "players": {str(pid): worm for pid, worm in state["players"].items()},
+    }
+    with open(SAVE_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=2)
+    return f"[ЗБЕРЕЖЕНО] Гру записано у {os.path.basename(SAVE_FILE)}"
+
+
+def load_game() -> dict:
+    with open(SAVE_FILE, "r", encoding="utf-8") as file:
+        data = json.load(file)
+
+    board = [list(row) for row in data["board"]]
+    if not board or any(len(row) != len(board[0]) for row in board):
+        raise ValueError("пошкоджене поле")
+
+    players = {}
+    for pid_text, worm in data["players"].items():
+        pid = int(pid_text)
+        players[pid] = {"x": int(worm["x"]), "y": int(worm["y"]), "hp": int(worm["hp"])}
+        if board[players[pid]["y"]][players[pid]["x"]] != str(pid):
+            raise ValueError(f"гравець {pid} не на своєму місці")
+    if set(players) != {1, 2}:
+        raise ValueError("має бути рівно два гравці")
+
+    return {
+        "level_name": data["level_name"],
+        "level_index": data.get("level_index"),
+        "board": board,
+        "width": len(board[0]),
+        "height": len(board),
+        "turn": int(data["turn"]),
+        "status": "[ЗАВАНТАЖЕНО] Продовжуємо збережену гру",
+        "players": players,
+    }
+
+
+def choose_start(catalog: list[dict]) -> dict:
     clear_screen()
     print("=== Worms Duel Console Edition ===")
-    print("1 - Два пагорби (levels/level1.txt)")
-    print("2 - Тест: замурована карта (levels/test_closed.txt)")
+    for num, item in enumerate(catalog, start=1):
+        print(f"{num} - {item['title']}")
+    print("T - Тест: карта з бетонною стіною")
     print("R - випадкова карта")
+    if os.path.exists(SAVE_FILE):
+        print("L - продовжити збережену гру")
     choice = input("Ваш вибір: ").strip().upper()
 
-    if choice in LEVEL_FILES:
-        path = LEVEL_FILES[choice]
-        try:
-            return load_level(path)
-        except FileNotFoundError:
-            print(f"[ПОМИЛКА] Файл {path} не знайдено. Генерую випадкову карту.")
-        except ValueError as error:
-            print(f"[ПОМИЛКА] Рівень відхилено: {error}. Генерую випадкову карту.")
+    try:
+        if choice == "L":
+            return load_game()
+        if choice == "T":
+            level = load_level(TEST_LEVEL_FILE)
+        elif choice.isdigit() and 1 <= int(choice) <= len(catalog):
+            level = load_catalog_level(catalog, int(choice) - 1)
+        else:
+            level = make_random_map()
+    except FileNotFoundError as error:
+        print(f"[ПОМИЛКА] Файл не знайдено: {error.filename}. Генерую випадкову карту.")
+        level = make_random_map()
+        time.sleep(2)
+    except (ValueError, KeyError, TypeError, IndexError, json.JSONDecodeError) as error:
+        print(f"[ПОМИЛКА] Не вдалося завантажити: {error}. Генерую випадкову карту.")
+        level = make_random_map()
         time.sleep(2)
 
-    return make_random_map()
+    return new_state_from_level(level)
 
 
-SCORES_FILE: str = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scores.txt")
+def new_state_from_level(level: dict) -> dict:
+    state = create_game_state(level["board"], level["spawns"], level["name"])
+    state["level_index"] = level.get("index")
+    return state
+
+
+SCORES_FILE: str = os.path.join(BASE_DIR, "scores.txt")
 
 
 # дописуємо результат в кінець файлу, режим "a" не стирає старі рекорди
@@ -475,9 +558,7 @@ def show_top_records(limit: int = 5) -> None:
         print(f"{place}. {winner} - {turns} ходів, {hp_left} HP ({level_name}, {date})")
 
 
-def main() -> None:
-    level = choose_map()
-    state = create_game_state(level["board"], level["spawns"], level["name"])
+def play_match(state: dict) -> str:
     dmg_engine = create_damage_calculator()
 
     clear_screen()
@@ -493,7 +574,7 @@ def main() -> None:
 
         clear_screen()
         render_battlefield([" ".join(row) for row in state["board"]])
-        print(f"Хід №{turn} | Черга: Гравець {active_player}")
+        print(f"Карта: {state['level_name']} | Хід №{turn} | Черга: Гравець {active_player}")
         print(f"Вітер: {wind_speed:+} (впливає на дальність)")
         p1, p2 = state["players"][1], state["players"][2]
         print(f"Гравець 1 (1): {p1['hp']} HP | Гравець 2 (2): {p2['hp']} HP")
@@ -506,7 +587,10 @@ def main() -> None:
         if cmd == "Q":
             # Здача не йде в рекорди, інакше "перемога за 1 хід" буде найкращою
             print(f"\nКінець гри: Гравець {active_player} здався!")
-            break
+            return "quit"
+        elif cmd == "S":
+            state["turn"] -= 1
+            state["status"] = save_game(state)
         elif cmd in MOVE_KEYS:
             dx, dy = MOVE_KEYS[cmd]
             state["status"] = move_worm(state, active_player, dx, dy)
@@ -524,13 +608,38 @@ def main() -> None:
             p1_hp, p2_hp = state["players"][1]["hp"], state["players"][2]["hp"]
             if p1_hp <= 0 and p2_hp <= 0:
                 save_record("Нічия", turn, state["level_name"], 0)
+                return "draw"
             elif p2_hp <= 0:
                 save_record("Гравець 1", turn, state["level_name"], p1_hp)
             else:
                 save_record("Гравець 2", turn, state["level_name"], p2_hp)
+            return "win"
+
+
+def main() -> None:
+    catalog = load_catalog()
+    state = choose_start(catalog)
+
+    while True:
+        outcome = play_match(state)
+        show_top_records()
+
+        index = state.get("level_index")
+        if outcome == "quit" or index is None or index + 1 >= len(catalog):
+            if index is not None and index + 1 >= len(catalog) and outcome != "quit":
+                print("\nВи пройшли всі рівні з каталогу!")
             break
 
-    show_top_records()
+        next_title = catalog[index + 1]["title"]
+        answer = input(f"\nПерейти до наступного рівня \"{next_title}\"? (Y/N): ").strip().upper()
+        if answer != "Y":
+            break
+
+        try:
+            state = new_state_from_level(load_catalog_level(catalog, index + 1))
+        except (FileNotFoundError, ValueError) as error:
+            print(f"[ПОМИЛКА] Наступний рівень не завантажився: {error}")
+            break
 
 
 if __name__ == "__main__":
