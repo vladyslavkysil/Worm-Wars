@@ -29,6 +29,7 @@ KEY_COMMANDS = {
     "RIGHT_ARROW": "RIGHT",
     "f": "FIRE",
     "s": "SAVE",
+    "p": "PAUSE",
     "q": "QUIT",
 }
 
@@ -52,13 +53,6 @@ def read_number(prompt: str, default: float) -> float:
         return float(input(prompt))
     except ValueError:
         return default
-
-
-def ask_yes_no(prompt: str) -> bool:
-    print(prompt, end="", flush=True)
-    answer = read_key()
-    print()
-    return answer == "y"
 
 
 class ConsoleRenderer:
@@ -106,7 +100,12 @@ class ConsoleRenderer:
     def draw_game(self, game: Game, status: str = "") -> None:
         lines = self._field_lines(self.capture(game)) + self._info_lines(game)
         lines += ["", status, ""]
-        lines.append("A/D або стрілки - рух | F - постріл | S - зберегти | Q - здатися")
+        lines.append("A/D або стрілки - рух | F - постріл | S - зберегти | P - пауза | Q - здатися")
+        self._write(lines)
+
+    def draw_pause(self, game: Game) -> None:
+        lines = self._field_lines(self.capture(game)) + self._info_lines(game)
+        lines += ["", "=== ПАУЗА ===", "P - продовжити | M - головне меню"]
         self._write(lines)
 
     def animate_shot(self, frame: Frame, shot: ShotResult) -> None:
@@ -146,7 +145,7 @@ class ConsoleRenderer:
         self.clear()
         self._write(lines)
 
-    def draw_game_over(self, game: Game, records: list[Record]) -> None:
+    def draw_game_over(self, game: Game, records: list[Record], has_next: bool) -> None:
         winner = game.winner
         if game.surrendered is not None:
             result = f"Гравець {game.surrendered} здався!"
@@ -162,6 +161,10 @@ class ConsoleRenderer:
         for place, record in enumerate(records, start=1):
             lines.append(f"{place}. {record}")
         lines.append("")
+        if has_next:
+            lines.append("N - наступний рівень | M - головне меню | Q - вихід")
+        else:
+            lines.append("M - головне меню | Q - вихід")
         self._write(lines)
 
     def __repr__(self) -> str:
