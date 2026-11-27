@@ -1,0 +1,11 @@
+[project]
+name = "worms-console"
+version = "4.0.0"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.mypy]
+files = ["game"]

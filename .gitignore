@@ -16,3 +16,7 @@ ENV/
 scores.txt
 
 savegame.json
+
+.coverage
+htmlcov/
+.hypothesis/

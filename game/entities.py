@@ -35,10 +35,7 @@ class Worm(Entity):
         super().__init__(x, y)
         self.pid = pid
         self.hp = hp
-
-    @property
-    def symbol(self) -> str:
-        return str(self.pid)
+        self.symbol = str(pid)
 
     @property
     def name(self) -> str:
